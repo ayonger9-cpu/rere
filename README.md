@@ -40,7 +40,7 @@ This autoscript is a lifetime free autoscript with simple xray x noobzvpns multi
 
 ``🚀 Installation Guide``
 ```html
-apt update && apt install wget curl screen gnupg openssl perl binutils -y && wget -O install.sh "https://raw.githubusercontent.com/ahaye-uty/rere/main/install.sh" && chmod +x install.sh && screen -S fn ./install.sh; if [ $? -ne 0 ]; then rm -f install.sh; fi
+apt update && apt install wget curl screen gnupg openssl perl binutils -y && wget -O install.sh "https://raw.githubusercontent.com/ayonger9-cpu/rere/main/install.sh" && chmod +x install.sh && screen -S fn ./install.sh; if [ $? -ne 0 ]; then rm -f install.sh; fi
 ```
 
 > Cukup satu command di atas. Fresh install sudah otomatis termasuk:
@@ -133,10 +133,10 @@ Kalau VPS udah jalan tapi belum punya fitur quota, jalanin satu-baris:
 
 ```bash
 # Xray quota
-bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/activate-quota.sh)
+bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/activate-quota.sh)
 
 # SSH quota
-bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/activate-quota-ssh.sh)
+bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/activate-quota-ssh.sh)
 ```
 
 Pertama kali jalan, masing-masing nanya default quota (sama persis kayak fresh install). Re-run berikutnya **skip prompt** kalau conf udah ada (pilihan admin di-preserve).
@@ -254,7 +254,7 @@ trojanman add | check | renew | del  <username> [days]
 Hapus tuntas autoscript Rere dari VPS — stop+disable semua service, apt purge package proxy-spesifik, hapus config dir + binary + systemd unit + cron entry + iptables rules, dan (opsional) hapus akun VPN. **Destructive, idempotent.**
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/uninstall.sh)
+bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/uninstall.sh)
 ```
 
 Script bakal nanya konfirmasi (ketik `UNINSTALL` huruf besar) sebelum eksekusi. Flag opsional:

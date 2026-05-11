@@ -20,7 +20,7 @@
 # Idempotent: aman di-run berkali-kali.
 #
 # Cara pakai:
-#   bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/uninstall-limit.sh)
+#   bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/uninstall-limit.sh)
 # ========================================================
 
 set -e

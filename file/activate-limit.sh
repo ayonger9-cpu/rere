@@ -10,7 +10,7 @@
 # sudah selesai).
 #
 # Usage:
-#   bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/activate-limit.sh)
+#   bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/activate-limit.sh)
 # ============================================================
 
 set -e
@@ -20,7 +20,7 @@ if [[ "$EUID" -ne 0 ]]; then
     exit 1
 fi
 
-HOSTING="https://raw.githubusercontent.com/ahaye-uty/rere/main/file"
+HOSTING="https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file"
 
 echo "[1/5] download IP limit + manager CLI scripts..."
 mkdir -p /usr/local/etc/xray /usr/local/bin /usr/local/sbin
