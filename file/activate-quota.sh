@@ -6,7 +6,7 @@
 # belum punya quota-xray. Idempotent — boleh dipanggil ulang.
 #
 # Cara pakai (1 baris dari fork main):
-#   bash <(curl -sL https://raw.githubusercontent.com/ahaye-uty/rere/main/file/activate-quota.sh)
+#   bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/activate-quota.sh)
 #
 # Yang dilakukan:
 #   1. Pastikan tooling ada (jq, xray binary, xray.service aktif)
@@ -18,7 +18,7 @@
 
 set -e
 
-HOSTING="${HOSTING:-https://raw.githubusercontent.com/ahaye-uty/rere/main/file}"
+HOSTING="${HOSTING:-https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file}"
 
 say() { echo "[activate-quota] $*"; }
 
