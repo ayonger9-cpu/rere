@@ -8,6 +8,56 @@ DOMAIN_FILE="/usr/local/etc/xray/domain"
 SERVICE="xray"
 DEFAULT_DAYS=30
 
+QUOTA_XRAY_DB="/usr/local/etc/xray/quota-xray.db"
+
+# Quota mode → GB mapping. Bisa di-override via /usr/local/etc/quota-mode.conf:
+#   QUOTA_MODE1_GB=100
+#   QUOTA_MODE2_GB=250
+QUOTA_MODE1_GB=100
+QUOTA_MODE2_GB=250
+MODE_CONF="/usr/local/etc/quota-mode.conf"
+[[ -f "$MODE_CONF" ]] && . "$MODE_CONF"
+
+quota_mb_for_mode() {
+  case "$1" in
+    1) echo $(( QUOTA_MODE1_GB * 1024 )) ;;
+    2) echo $(( QUOTA_MODE2_GB * 1024 )) ;;
+    *) echo 0 ;;
+  esac
+}
+
+valid_quota_mode() {
+  case "$1" in
+    0|1|2|"") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+write_xray_quota() {
+  local user="$1" mode="$2" limit_mb rdate tmp
+  case "$mode" in
+    0|"") return 0 ;;
+    1|2) ;;
+    *) echo "Quota mode '$mode' tidak valid (0/1/2)"; return 1 ;;
+  esac
+  limit_mb=$(quota_mb_for_mode "$mode")
+  rdate="$(date -d 'next month' +%Y-%m-01 2>/dev/null || date +%Y-%m-01)"
+  mkdir -p "$(dirname "$QUOTA_XRAY_DB")" 2>/dev/null || true
+  touch "$QUOTA_XRAY_DB"
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_XRAY_DB" > "$tmp"
+  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
+  mv "$tmp" "$QUOTA_XRAY_DB"
+  echo "Quota Xray: ${limit_mb} MB (mode $mode)"
+}
+
+prune_xray_quota() {
+  local user="$1" tmp
+  [[ -f "$QUOTA_XRAY_DB" ]] || return 0
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" '$1!=u' "$QUOTA_XRAY_DB" > "$tmp" && mv "$tmp" "$QUOTA_XRAY_DB"
+}
+
 proto_from_name() {
   case "$APP" in
     vlessman) echo "vless" ;;
@@ -23,14 +73,21 @@ proto_from_name() {
 usage() {
   cat <<EOF2
 Usage:
-  $APP add <username> [days]
+  $APP add <username> [days] [mode 0/1/2]
   $APP check <username>
   $APP renew <username> [days]
   $APP del <username>
 
+  mode 0 = tanpa quota (default)
+  mode 1 = ${QUOTA_MODE1_GB} GB
+  mode 2 = ${QUOTA_MODE2_GB} GB
+  Override default lewat /usr/local/etc/quota-mode.conf
+
 Contoh:
   $APP add aloi
   $APP add aloi 30
+  $APP add aloi 30 1       # 30 hari, quota mode 1
+  $APP add aloi 30 2       # 30 hari, quota mode 2
   $APP check aloi
   $APP renew aloi 30
   $APP del aloi
@@ -264,6 +321,7 @@ del_user() {
       ;;
   esac
 
+  prune_xray_quota "$user"
   restart_service
   echo "User '$user' berhasil dihapus dari $proto"
 }
@@ -286,7 +344,9 @@ main() {
 
   case "$action" in
     add)
+      local mode="${4:-0}"
       valid_days "$days" || { echo "Days harus angka > 0"; exit 1; }
+      valid_quota_mode "$mode" || { echo "Quota mode '$mode' tidak valid (0/1/2)"; exit 1; }
       exists_user "$proto" "$user" && {
         echo "User '$user' sudah ada di $proto"
         exit 1
@@ -296,6 +356,7 @@ main() {
         vmess)  add_vmess "$user" "$days" ;;
         trojan) add_trojan "$user" "$days" ;;
       esac
+      write_xray_quota "$user" "$mode"
       ;;
     check)
       check_user "$proto" "$user"

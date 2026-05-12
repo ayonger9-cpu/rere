@@ -5,16 +5,57 @@ CMD="${1:-}"
 USER="${2:-}"
 PASS="${3:-}"
 IPLIMIT="${4:-2}"
+QMODE="${5:-0}"
 [[ "$IPLIMIT" != "1" ]] && IPLIMIT=2
 
 DB_FILE="/usr/local/etc/xray/limit-ip.db"
+QUOTA_SSH_DB="/usr/local/etc/quota-ssh.db"
+
+# Quota mode → GB mapping. Bisa di-override via /usr/local/etc/quota-mode.conf:
+#   QUOTA_MODE1_GB=100
+#   QUOTA_MODE2_GB=250
+QUOTA_MODE1_GB=100
+QUOTA_MODE2_GB=250
+MODE_CONF="/usr/local/etc/quota-mode.conf"
+[[ -f "$MODE_CONF" ]] && . "$MODE_CONF"
+
+quota_mb_for_mode() {
+  case "$1" in
+    1) echo $(( QUOTA_MODE1_GB * 1024 )) ;;
+    2) echo $(( QUOTA_MODE2_GB * 1024 )) ;;
+    *) echo 0 ;;
+  esac
+}
+
+write_ssh_quota() {
+  local user="$1" mode="$2" limit_mb rdate tmp
+  case "$mode" in
+    0|"") return 0 ;;
+    1|2) ;;
+    *) echo "Quota mode '$mode' tidak valid (0/1/2)"; return 1 ;;
+  esac
+  limit_mb=$(quota_mb_for_mode "$mode")
+  rdate="$(date -d 'next month' +%Y-%m-01 2>/dev/null || date +%Y-%m-01)"
+  mkdir -p "$(dirname "$QUOTA_SSH_DB")" 2>/dev/null || true
+  touch "$QUOTA_SSH_DB"
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_SSH_DB" > "$tmp"
+  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
+  mv "$tmp" "$QUOTA_SSH_DB"
+  echo "Quota SSH: ${limit_mb} MB (mode $mode)"
+}
 
 usage() {
   echo "Usage:"
-  echo "  sshman add <username> <password> [iplimit 1/2]"
+  echo "  sshman add <username> <password> [iplimit 1/2] [mode 0/1/2]"
   echo "  sshman check <username>"
   echo "  sshman del <username>"
   echo "  sshman unlock <username>"
+  echo ""
+  echo "  mode 0 = tanpa quota (default)"
+  echo "  mode 1 = ${QUOTA_MODE1_GB} GB"
+  echo "  mode 2 = ${QUOTA_MODE2_GB} GB"
+  echo "  Override default lewat /usr/local/etc/quota-mode.conf"
   exit 1
 }
 
@@ -56,7 +97,8 @@ case "$CMD" in
     touch "$DB_FILE" 2>/dev/null || true
     sed -i "/^$USER /d" "$DB_FILE" 2>/dev/null || true
     echo "$USER $IPLIMIT" >> "$DB_FILE"
-    echo "Added SSH: $USER (limit: $IPLIMIT IP)"
+    write_ssh_quota "$USER" "$QMODE" || { userdel "$USER" &>/dev/null || true; exit 1; }
+    echo "Added SSH: $USER (limit: $IPLIMIT IP, mode: $QMODE)"
     ;;
 
   check)
@@ -76,6 +118,10 @@ case "$CMD" in
     do_unlock
     userdel "$USER" &>/dev/null || true
     sed -i "/^$USER /d" "$DB_FILE" 2>/dev/null || true
+    if [[ -f "$QUOTA_SSH_DB" ]]; then
+      tmp="$(mktemp)"
+      awk -F'|' -v u="$USER" '$1!=u' "$QUOTA_SSH_DB" > "$tmp" && mv "$tmp" "$QUOTA_SSH_DB"
+    fi
     echo "Deleted SSH: $USER"
     ;;
 

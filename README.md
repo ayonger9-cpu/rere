@@ -193,19 +193,43 @@ User yang di-block: `/etc/shadow` line-nya di-backup ke `/usr/local/etc/quota-ss
 
 Wrapper CLI buat manajemen akun dari shell (selain menu interaktif). Cocok untuk integrasi bot Telegram / API.
 
-**SSH (`sshman`) — dengan IP limit:**
+**SSH (`sshman`) — dengan IP limit + quota mode:**
 ```bash
-sshman add <username> <password> [iplimit 1/2]    # default iplimit = 2
+sshman add <username> <password> [iplimit 1/2] [mode 0/1/2]   # default iplimit=2, mode=0
 sshman check <username>
 sshman del <username>
-sshman unlock <username>                          # reset faillock + pam_tally2
+sshman unlock <username>                                       # reset faillock + pam_tally2
 ```
 
-**Xray (`vmessman` / `vlessman` / `trojanman`) — tanpa IP limit:**
+**Xray (`vmessman` / `vlessman` / `trojanman`) — tanpa IP limit, dengan quota mode:**
 ```bash
-vmessman  add | check | renew | del  <username> [days]   # default 30 hari
-vlessman  add | check | renew | del  <username> [days]
-trojanman add | check | renew | del  <username> [days]
+vmessman  add  <username> [days] [mode 0/1/2]                  # default days=30, mode=0
+vmessman  check | renew | del  <username> [days]
+vlessman  add  <username> [days] [mode 0/1/2]
+vlessman  check | renew | del  <username> [days]
+trojanman add  <username> [days] [mode 0/1/2]
+trojanman check | renew | del  <username> [days]
+```
+
+**Quota mode (sshman / vmessman / vlessman / trojanman `add`):**
+- `mode 0` (default) → user dibuat **tanpa quota** (legacy behavior, backward-compat)
+- `mode 1` → user dibuat dengan quota **100 GB**
+- `mode 2` → user dibuat dengan quota **250 GB**
+
+Saat `mode != 0`, baris di-write ke DB yang sesuai (`/usr/local/etc/quota-ssh.db` untuk SSH, `/usr/local/etc/xray/quota-xray.db` untuk Xray) sebagai `username|LIMIT_MB|0|active|<reset_date>`. Tracker cron (`quota-ssh` / `quota-xray`) akan langsung nge-akumulasi traffic-nya, dan dia bakal auto-block kalau lewat. Mau ubah quota nanti? Pake menu `Set SSH Quota` / `Set Xray Quota` (option 17/19) atau `set-quota-ssh` / `set-quota`.
+
+Default GB-per-mode bisa di-override (server-wide) lewat `/usr/local/etc/quota-mode.conf`:
+```
+QUOTA_MODE1_GB=100
+QUOTA_MODE2_GB=250
+```
+
+Contoh:
+```bash
+sshman   add ekoo ganteng 1 1     # SSH user ekoo, password ganteng, IP limit 1, quota 100 GB
+sshman   add ekoo ganteng 1 2     # ... quota 250 GB
+vmessman add ekoo 30 1            # vmess user ekoo, expired 30 hari, quota 100 GB
+trojanman add ekoo 30 2           # trojan user ekoo, expired 30 hari, quota 250 GB
 ```
 
 ---
