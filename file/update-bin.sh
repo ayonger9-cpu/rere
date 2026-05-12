@@ -2,17 +2,21 @@
 # ========================================================
 # update-bin.sh
 #
-# Update wrapper CLI account manager (sshman, vmessman, vlessman, trojanman)
-# di /usr/local/bin DAN /usr/local/sbin dari fork. Idempotent — aman
+# Update wrapper CLI account manager dari fork. Idempotent — aman
 # dipanggil berkali-kali.
 #
-# Kenapa dua lokasi:
-#   install.sh aslinya naro sshman di /usr/local/bin tapi vmessman /
-#   vlessman / trojanman di /usr/local/sbin. Bergantung PATH (biasanya
-#   /sbin sebelum /bin di root shell), bare `vmessman` bisa resolve ke
-#   /usr/local/sbin/vmessman — jadi kalau update cuma /bin doang, copy
-#   lama di /sbin yg ke-jalanin. Solusi paling robust: tulis ke dua-
-#   duanya sehingga either-or lookup PATH selalu dapet versi baru.
+# Layout (match install.sh):
+#   sshman                            → /usr/local/bin
+#   vmessman / vlessman / trojanman   → /usr/local/bin DAN /usr/local/sbin
+#
+# Kenapa xray-managers ke dua lokasi:
+#   install.sh aslinya naro vmessman/vlessman/trojanman di /usr/local/sbin.
+#   Bergantung PATH (biasanya /sbin sebelum /bin di root shell), bare
+#   `vmessman` bisa resolve ke /usr/local/sbin/vmessman — jadi kalau update
+#   cuma /bin doang, copy lama di /sbin yg ke-jalanin. Solusi paling
+#   robust: tulis ke dua-duanya sehingga either-or lookup PATH selalu
+#   dapet versi baru. sshman tetep cuma di /usr/local/bin sesuai layout
+#   asli.
 #
 # Cara pakai (1 baris dari fork main):
 #   bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/update-bin.sh)
@@ -41,6 +45,16 @@ fi
 
 for d in "${DESTS[@]}"; do mkdir -p "$d"; done
 
+# Per-binary destinations. sshman cuma /bin sesuai install.sh; xray
+# managers tulis ke dua lokasi.
+dests_for() {
+  case "$1" in
+    sshman) echo "/usr/local/bin" ;;
+    vmessman|vlessman|trojanman) echo "/usr/local/bin /usr/local/sbin" ;;
+    *) echo "/usr/local/bin" ;;
+  esac
+}
+
 BINS=(sshman vmessman vlessman trojanman)
 UPDATED=0
 FAILED=0
@@ -49,10 +63,16 @@ for f in "${BINS[@]}"; do
   url="${HOSTING}/${f}"
   tmp="$(mktemp)"
   if curl -fsSL "$url" -o "$tmp"; then
-    for d in "${DESTS[@]}"; do
+    for d in $(dests_for "$f"); do
       install -m 0755 "$tmp" "${d}/${f}"
       say "OK  -> ${d}/${f}"
     done
+    # Cleanup: hapus copy stray sshman di /usr/local/sbin kalau ada
+    # (sshman wajib di /usr/local/bin saja).
+    if [ "$f" = "sshman" ] && [ -e /usr/local/sbin/sshman ]; then
+      rm -f /usr/local/sbin/sshman
+      say "removed stray /usr/local/sbin/sshman"
+    fi
     rm -f "$tmp"
     UPDATED=$(( UPDATED + 1 ))
   else
@@ -62,8 +82,8 @@ for f in "${BINS[@]}"; do
   fi
 done
 
-# Verifikasi: bandingin checksum di dua lokasi (harus identik).
-for f in "${BINS[@]}"; do
+# Verifikasi: untuk xray managers, md5 di /bin dan /sbin harus identik.
+for f in vmessman vlessman trojanman; do
   a="/usr/local/bin/${f}"; b="/usr/local/sbin/${f}"
   if [ -f "$a" ] && [ -f "$b" ]; then
     ha="$(md5sum "$a" | awk '{print $1}')"
