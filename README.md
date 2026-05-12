@@ -232,6 +232,12 @@ vmessman add ekoo 30 1            # vmess user ekoo, expired 30 hari, quota 100 
 trojanman add ekoo 30 2           # trojan user ekoo, expired 30 hari, quota 250 GB
 ```
 
+**Update wrapper CLI (kalau VPS udah ke-install dari versi lama, refresh aja):**
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/update-bin.sh)
+```
+Idempotent — re-download `sshman` / `vmessman` / `vlessman` / `trojanman` dari fork ke `/usr/local/bin/`. Aman dipanggil berkali-kali.
+
 ---
 
 ## 🌐 Port Information
