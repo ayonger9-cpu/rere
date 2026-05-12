@@ -10,6 +10,7 @@ QMODE="${5:-0}"
 
 DB_FILE="/usr/local/etc/xray/limit-ip.db"
 QUOTA_SSH_DB="/usr/local/etc/quota-ssh.db"
+QUOTA_SSH_LOCK="/var/lock/quota-ssh.lock"
 
 # Quota mode → GB mapping. Bisa di-override via /usr/local/etc/quota-mode.conf:
 #   QUOTA_MODE1_GB=100
@@ -27,8 +28,33 @@ quota_mb_for_mode() {
   esac
 }
 
+# Lock pake file yang sama dengan quota-ssh.sh (cron tracker), jadi write
+# di sini ke-serialize sama cron tick — hindari race: cron snapshot DB →
+# sshman ubah DB → cron mv tmp ke DB (overwrite sshman). Identik dgn fix
+# di vmessman/vlessman/trojanman buat quota-xray.
+_with_ssh_lock() {
+  (
+    flock -w 10 9 || { echo "ERROR: gagal acquire $QUOTA_SSH_LOCK" >&2; exit 1; }
+    "$@"
+  ) 9>"$QUOTA_SSH_LOCK"
+}
+
+_do_write_ssh_quota() {
+  local user="$1" limit_mb="$2" rdate="$3" tmp
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_SSH_DB" > "$tmp"
+  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
+  mv "$tmp" "$QUOTA_SSH_DB"
+}
+
+_do_prune_ssh_quota() {
+  local user="$1" tmp
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" '$1!=u' "$QUOTA_SSH_DB" > "$tmp" && mv "$tmp" "$QUOTA_SSH_DB"
+}
+
 write_ssh_quota() {
-  local user="$1" mode="$2" limit_mb rdate tmp
+  local user="$1" mode="$2" limit_mb rdate
   case "$mode" in
     0|"") return 0 ;;
     1|2) ;;
@@ -38,10 +64,7 @@ write_ssh_quota() {
   rdate="$(date -d 'next month' +%Y-%m-01 2>/dev/null || date +%Y-%m-01)"
   mkdir -p "$(dirname "$QUOTA_SSH_DB")" 2>/dev/null || true
   touch "$QUOTA_SSH_DB"
-  tmp="$(mktemp)"
-  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_SSH_DB" > "$tmp"
-  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
-  mv "$tmp" "$QUOTA_SSH_DB"
+  _with_ssh_lock _do_write_ssh_quota "$user" "$limit_mb" "$rdate"
   echo "Quota SSH: ${limit_mb} MB (mode $mode)"
 }
 
@@ -97,6 +120,8 @@ case "$CMD" in
     touch "$DB_FILE" 2>/dev/null || true
     sed -i "/^$USER /d" "$DB_FILE" 2>/dev/null || true
     echo "$USER $IPLIMIT" >> "$DB_FILE"
+    # write_ssh_quota di-serialize lewat _with_ssh_lock (flock on
+    # /var/lock/quota-ssh.lock) supaya gak race sama cron quota-ssh.
     write_ssh_quota "$USER" "$QMODE" || { userdel "$USER" &>/dev/null || true; exit 1; }
     echo "Added SSH: $USER (limit: $IPLIMIT IP, mode: $QMODE)"
     ;;
@@ -118,9 +143,11 @@ case "$CMD" in
     do_unlock
     userdel "$USER" &>/dev/null || true
     sed -i "/^$USER /d" "$DB_FILE" 2>/dev/null || true
+    # userdel udah remove user dari /etc/passwd, jadi cron quota-ssh gak
+    # bakal nge-track ulang user ini. Prune DB row dengan flock supaya
+    # gak ke-race sama cron tick yg mungkin lagi jalan.
     if [[ -f "$QUOTA_SSH_DB" ]]; then
-      tmp="$(mktemp)"
-      awk -F'|' -v u="$USER" '$1!=u' "$QUOTA_SSH_DB" > "$tmp" && mv "$tmp" "$QUOTA_SSH_DB"
+      _with_ssh_lock _do_prune_ssh_quota "$USER"
     fi
     echo "Deleted SSH: $USER"
     ;;

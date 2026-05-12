@@ -9,6 +9,7 @@ SERVICE="xray"
 DEFAULT_DAYS=30
 
 QUOTA_XRAY_DB="/usr/local/etc/xray/quota-xray.db"
+QUOTA_XRAY_LOCK="/var/lock/quota-xray.lock"
 
 # Quota mode → GB mapping. Bisa di-override via /usr/local/etc/quota-mode.conf:
 #   QUOTA_MODE1_GB=100
@@ -33,8 +34,28 @@ valid_quota_mode() {
   esac
 }
 
+# Lock pake file yang sama dengan quota-xray.sh (cron tracker), jadi write
+# di sini ke-serialize sama cron tick — hindari race: cron snapshot DB →
+# vmessman ubah DB → cron mv tmp ke DB (overwrite vmessman). Tanpa lock,
+# user yg baru ke-add bisa ke-auto-track dgn DEFAULT_QUOTA_MB sebelum row
+# mode-based-nya ke-tulis, lalu hilang lagi karena race.
+_with_xray_lock() {
+  (
+    flock -w 10 9 || { echo "ERROR: gagal acquire $QUOTA_XRAY_LOCK" >&2; exit 1; }
+    "$@"
+  ) 9>"$QUOTA_XRAY_LOCK"
+}
+
+_do_write_xray_quota() {
+  local user="$1" limit_mb="$2" rdate="$3" tmp
+  tmp="$(mktemp)"
+  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_XRAY_DB" > "$tmp"
+  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
+  mv "$tmp" "$QUOTA_XRAY_DB"
+}
+
 write_xray_quota() {
-  local user="$1" mode="$2" limit_mb rdate tmp
+  local user="$1" mode="$2" limit_mb rdate
   case "$mode" in
     0|"") return 0 ;;
     1|2) ;;
@@ -44,18 +65,20 @@ write_xray_quota() {
   rdate="$(date -d 'next month' +%Y-%m-01 2>/dev/null || date +%Y-%m-01)"
   mkdir -p "$(dirname "$QUOTA_XRAY_DB")" 2>/dev/null || true
   touch "$QUOTA_XRAY_DB"
-  tmp="$(mktemp)"
-  awk -F'|' -v u="$user" 'BEGIN{OFS="|"} $1!=u {print}' "$QUOTA_XRAY_DB" > "$tmp"
-  echo "$user|$limit_mb|0|active|$rdate" >> "$tmp"
-  mv "$tmp" "$QUOTA_XRAY_DB"
+  _with_xray_lock _do_write_xray_quota "$user" "$limit_mb" "$rdate"
   echo "Quota Xray: ${limit_mb} MB (mode $mode)"
 }
 
-prune_xray_quota() {
+_do_prune_xray_quota() {
   local user="$1" tmp
-  [[ -f "$QUOTA_XRAY_DB" ]] || return 0
   tmp="$(mktemp)"
   awk -F'|' -v u="$user" '$1!=u' "$QUOTA_XRAY_DB" > "$tmp" && mv "$tmp" "$QUOTA_XRAY_DB"
+}
+
+prune_xray_quota() {
+  local user="$1"
+  [[ -f "$QUOTA_XRAY_DB" ]] || return 0
+  _with_xray_lock _do_prune_xray_quota "$user"
 }
 
 proto_from_name() {
@@ -321,8 +344,12 @@ del_user() {
       ;;
   esac
 
-  prune_xray_quota "$user"
+  # Restart dulu supaya xray drop user dari stats, baru prune DB.
+  # Kalau prune duluan, ada race window: xray masih serve user (di-memory),
+  # cron snapshot stats include user, DB udah ke-prune → cron auto-track
+  # nambah balik row-nya dengan DEFAULT_QUOTA_MB.
   restart_service
+  prune_xray_quota "$user"
   echo "User '$user' berhasil dihapus dari $proto"
 }
 
@@ -356,6 +383,11 @@ main() {
         vmess)  add_vmess "$user" "$days" ;;
         trojan) add_trojan "$user" "$days" ;;
       esac
+      # write_xray_quota di-serialize lewat _with_xray_lock (flock on
+      # /var/lock/quota-xray.lock). Race scenario: cron `quota-xray`
+      # auto-track user pake DEFAULT_QUOTA_MB di antara restart xray dan
+      # call ini — write_xray_quota tetep nge-override row-nya dgn limit
+      # mode-based, karena awk filter user dulu sebelum append.
       write_xray_quota "$user" "$mode"
       ;;
     check)
