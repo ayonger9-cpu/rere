@@ -2,8 +2,17 @@
 # ========================================================
 # update-bin.sh
 #
-# Update wrapper CLI account manager (sshman, vmessman, vlessman, trojanman)
-# di /usr/local/bin dari fork. Idempotent — aman dipanggil berkali-kali.
+# Update wrapper CLI account manager dari fork. Idempotent — aman
+# dipanggil berkali-kali.
+#
+# Layout (match install.sh persis):
+#   sshman                            → /usr/local/bin
+#   vmessman / vlessman / trojanman   → /usr/local/sbin
+#
+# Cleanup behavior: kalau ada copy stray di lokasi yg "salah"
+# (misal /usr/local/bin/vmessman dari update-bin.sh versi sebelumnya
+# yg keliru install ke /bin), di-hapus supaya PATH lookup gak
+# nge-resolve ke copy lama.
 #
 # Cara pakai (1 baris dari fork main):
 #   bash <(curl -sL https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file/update-bin.sh)
@@ -16,12 +25,12 @@
 set -e
 
 HOSTING="${HOSTING:-https://raw.githubusercontent.com/ayonger9-cpu/rere/main/file}"
-DEST="${DEST:-/usr/local/bin}"
+DESTS=(/usr/local/bin /usr/local/sbin)
 
 say() { echo "[update-bin] $*"; }
 
 if [ "$(id -u)" -ne 0 ]; then
-  say "ERROR: jalanin sebagai root (script tulis ke $DEST)."
+  say "ERROR: jalanin sebagai root (script tulis ke ${DESTS[*]})."
   exit 1
 fi
 
@@ -30,7 +39,23 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$DEST"
+for d in "${DESTS[@]}"; do mkdir -p "$d"; done
+
+# Per-binary destination + stray location.
+#   dest_for      = lokasi resmi (match install.sh)
+#   stray_for     = lokasi yg HARUS di-cleanup kalau ada copy nyangkut
+dest_for() {
+  case "$1" in
+    sshman) echo "/usr/local/bin" ;;
+    vmessman|vlessman|trojanman) echo "/usr/local/sbin" ;;
+  esac
+}
+stray_for() {
+  case "$1" in
+    sshman) echo "/usr/local/sbin/sshman" ;;
+    vmessman|vlessman|trojanman) echo "/usr/local/bin/$1" ;;
+  esac
+}
 
 BINS=(sshman vmessman vlessman trojanman)
 UPDATED=0
@@ -40,9 +65,15 @@ for f in "${BINS[@]}"; do
   url="${HOSTING}/${f}"
   tmp="$(mktemp)"
   if curl -fsSL "$url" -o "$tmp"; then
-    install -m 0755 "$tmp" "${DEST}/${f}"
+    d="$(dest_for "$f")"
+    install -m 0755 "$tmp" "${d}/${f}"
+    say "OK  -> ${d}/${f}"
+    stray="$(stray_for "$f")"
+    if [ -n "$stray" ] && [ -e "$stray" ]; then
+      rm -f "$stray"
+      say "removed stray $stray"
+    fi
     rm -f "$tmp"
-    say "OK  -> ${DEST}/${f}"
     UPDATED=$(( UPDATED + 1 ))
   else
     rm -f "$tmp"
@@ -58,9 +89,20 @@ if [ "$FAILED" -gt 0 ]; then
 fi
 
 # Smoke test ringan: usage harusnya muncul (exit non-zero karena no args itu wajar).
+# Plus log lokasi yg PATH lookup user akan resolve — supaya kalau ada
+# mismatch ke-spot di sini.
 for f in "${BINS[@]}"; do
-  if [ -x "${DEST}/${f}" ]; then
-    "${DEST}/${f}" >/dev/null 2>&1 || true
+  via_path="$(command -v "$f" 2>/dev/null || true)"
+  installed="$(dest_for "$f")/${f}"
+  if [ -x "$installed" ]; then
+    "$installed" >/dev/null 2>&1 || true
+  fi
+  if [ -z "$via_path" ]; then
+    say "WARN: \`$f\` gak ke-resolve di PATH (\$PATH=$PATH). Installed at $installed."
+  elif [ "$via_path" != "$installed" ]; then
+    say "WARN: \`$f\` PATH resolve ke $via_path, tapi install ke $installed. Cek PATH order."
+  else
+    say "resolved \`$f\` -> $via_path"
   fi
 done
 
